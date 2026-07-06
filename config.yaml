@@ -1,0 +1,10 @@
+# Workload constraints. These numbers model real hardware/API limits — they ARE
+# the exercise. Don't raise/remove them to "go faster": working within them is the
+# point. (You may read them; the mocks read them too.)
+
+cpu_ms_per_ticket:   5     # CPU-bound feature step: busy-loops this long per ticket
+gpu_ms_per_ticket:   8     # GPU embed step: per-ticket latency (batch-friendly)
+gpu_slots:           2     # only this many embeds run at once, cluster-wide
+llm_latency_ms:      700   # LLM summarise call latency
+llm_max_in_flight:   8     # LLM API 429s if more than this are in flight, cluster-wide
+llm_error_rate:      0.03  # fraction of LLM calls that 429 transiently (retry them)

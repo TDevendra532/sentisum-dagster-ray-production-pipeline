@@ -1,0 +1,76 @@
+# Dagster app + a local Ray cluster.
+#
+#   docker compose up -d --build
+#   # Dagster UI → http://localhost:3000   |   Ray dashboard → http://localhost:8265
+#
+# Scale CPU workers (no code change):
+#   docker compose up -d --scale ray-worker=4
+# Big run:
+#   EXERCISE_N=10000 docker compose up -d --scale ray-worker=4
+#
+# Topology:
+#   ray-head        head node, --num-cpus=0 so no work schedules on it (dashboard + GCS only)
+#   ray-worker      generic CPU workers (featurize + LLM-call slots) — scale these
+#   ray-gpu-worker  the ONE node advertising the scarce custom resource gpu_slot=2
+#                   (config.yaml: gpu_slots) — embed tasks each request {"gpu_slot": 1},
+#                   so at most 2 embed batches run at once, cluster-wide.
+
+x-ray-common: &ray-common
+  image: exercise:latest
+  volumes: [".:/app"]
+  working_dir: /app
+  shm_size: "2g"
+  environment:
+    PYTHONPATH: /app
+
+services:
+  app:
+    build: .
+    image: exercise:latest
+    volumes: [".:/app"]
+    working_dir: /app
+    command: dagster dev -h 0.0.0.0 -p 3000 -m pipeline.definitions
+    environment:
+      DAGSTER_HOME: /tmp/dagster
+      EXERCISE_N: "${EXERCISE_N:-200}"   # run size; EXERCISE_N=10000 docker compose up -d
+      RAY_ADDRESS: "ray://ray-head:10001"
+      PYTHONPATH: /app
+      # Tunables (sane defaults; override per-run without code change)
+      FEATURIZE_BATCH: "${FEATURIZE_BATCH:-100}"
+      EMBED_BATCH: "${EMBED_BATCH:-64}"
+    shm_size: "2g"
+    ports: ["3000:3000"]                 # Dagster UI
+    depends_on: [ray-head]
+
+  ray-head:
+    <<: *ray-common
+    command:
+      - bash
+      - -c
+      - >
+        ray start --head --port=6379
+        --ray-client-server-port=10001
+        --dashboard-host=0.0.0.0 --dashboard-port=8265
+        --num-cpus=0
+        --block
+    ports: ["8265:8265"]                 # Ray dashboard
+
+  # Generic CPU workers. Scale with: docker compose up -d --scale ray-worker=N
+  ray-worker:
+    <<: *ray-common
+    command:
+      - bash
+      - -c
+      - ray start --address=ray-head:6379 --num-cpus=2 --block
+    depends_on: [ray-head]
+    deploy:
+      replicas: 2
+
+  # The GPU node: advertises gpu_slot=2 (the scarce resource from config.yaml).
+  ray-gpu-worker:
+    <<: *ray-common
+    command:
+      - bash
+      - -c
+      - ray start --address=ray-head:6379 --num-cpus=2 --resources='{"gpu_slot": 2}' --block
+    depends_on: [ray-head]

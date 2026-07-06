@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+/tmp/
+.dagster/
+dagster_home/
+*.log
+.DS_Store
+.claude/
